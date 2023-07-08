@@ -1,0 +1,550 @@
+-- Viewing all tables one by one : 
+select * from Customer;
+select * from Item;
+select * from CustomerTransactionData;
+select * from CouponMapping;
+select * from City;
+select * from Campaign;
+
+
+-- Section 1: 
+-- Q1. Checking the cardinality of following columns:
+--      Different color segments (categories) provided by the company.
+SELECT 
+    COUNT(DISTINCT (Item_Category))
+FROM
+    Item;
+
+-- Different Coupon Types that are offered.
+SELECT 
+    COUNT(DISTINCT (couponType))
+FROM
+    CouponMapping;
+
+-- States where the company is currently delivering its products and services.
+SELECT 
+    COUNT(DISTINCT (State))
+FROM
+    City;
+
+-- Different Order Types.
+SELECT 
+    COUNT(DISTINCT (OrderType))
+FROM
+    CustomerTransactionData;
+
+
+-- Q2. Identifying total number of sales (transactions) happened by
+-- Yearly basis
+SELECT 
+    YEAR(PurchaseDate) AS _Year_,
+    COUNT(Trans_Id) AS No_Of_Transactions
+FROM
+    CustomerTransactionData
+GROUP BY YEAR(PurchaseDate)
+ORDER BY _Year_;
+
+-- Quarterly basis
+SELECT 
+    YEAR(PurchaseDate) AS _Year_,
+    QUARTER(PurchaseDate) AS _Quarter_,
+    COUNT(*) AS No_Of_Transactions
+FROM
+    CustomerTransactionData
+GROUP BY YEAR(PurchaseDate) , QUARTER(PurchaseDate)
+ORDER BY _Year_ , _Quarter_;
+
+-- Yearly and Monthly basis
+SELECT 
+    YEAR(PurchaseDate) AS _Year_,
+    MONTH(PurchaseDate) AS _Month_,
+    COUNT(*) AS No_Of_Transactions
+FROM
+    CustomerTransactionData
+GROUP BY YEAR(PurchaseDate) , MONTH(PurchaseDate)
+ORDER BY _Year_ , _Month_;
+
+
+-- Q3.. Identifying  the total purchase order by
+-- Product category
+SELECT 
+    Item_Category, Round(SUM(PurchasingAmt)) AS Total_Puchase
+FROM
+    CustomerTransactionData CTD
+        JOIN
+    Item I ON CTD.item_id = I.Item_Id
+GROUP BY Item_Category
+ORDER BY Total_Puchase;
+
+-- Yearly and Quarterly basis
+SELECT 
+    YEAR(PurchaseDate) AS _Year_,
+    QUARTER(PurchaseDate) AS _Quarter_,
+    ROUND(SUM(PurchasingAmt)) AS Total_Puchase
+FROM
+    CustomerTransactionData
+GROUP BY YEAR(PurchaseDate) , QUARTER(PurchaseDate)
+ORDER BY _Year_ , _Quarter_;
+
+-- Order Type
+SELECT 
+    OrderType, ROUND(SUM(PurchasingAmt)) AS Total_Purchase
+FROM
+    CustomerTransactionData
+GROUP BY OrderType;
+
+-- City Tier
+SELECT 
+    CityTier, ROUND(SUM(PurchasingAmt)) AS Total_Purchase
+FROM
+    CustomerTransactionData CTD
+        JOIN
+    Customer C ON CTD.Cust_Id = C.Customer_Id
+        JOIN
+    City CI ON C.City_Id = CI.City_Id
+GROUP BY CityTier;
+
+
+-- Section 2 : 
+-- Here in this section I have tried  to understand the customer path to conversion as a potential purchaser based on our campaigns.
+-- 1. Identifying the total number of transactions with campaign coupon vs total number of transactions without campaign coupon.
+SELECT 
+    Campaign_Coupon_Usage, COUNT(*) AS No_of_Tranctions
+FROM
+    (SELECT 
+        *,
+            CASE
+                WHEN campaign_id IS NULL THEN 'coupon not used'
+                ELSE 'coupon used'
+            END AS Campaign_Coupon_Usage
+    FROM
+        CustomerTransactionData) T
+GROUP BY Campaign_Coupon_Usage;
+
+-- 2. Identifying the number of customers with first purchase done with or without campaign coupons.
+SELECT 
+	segment,COUNT(*) AS No_Of_Purchases 
+FROM
+	(SELECT 
+		Trans_Id,Cust_Id,Purchase_Number, 
+		CASE 
+			WHEN Purchase_Number = 1 AND campaign_id IS NULL THEN "First_Purchase_Without_Campaign_Coupan"
+			WHEN Purchase_Number = 1 and campaign_id IS NOT NULL THEN "First_Purchase With_Campaign_Coupan"
+			END AS segment FROM 
+	(SELECT 
+		*,ROW_NUMBER() OVER(PARTITION BY Cust_Id ORDER BY PurchaseDate) AS Purchase_Number 
+	 FROM 
+		CustomerTransactionData) T 
+	WHERE Purchase_Number = 1) A GROUP BY segment;
+
+-- 3. Identifying the impact of campaigns on users
+
+-- Checking the total number of unique users making purchases with or without campaign coupons.
+SELECT 
+    segment, COUNT(*) AS No_Of_Unique_Customers
+FROM
+    (SELECT DISTINCT
+        Cust_Id,
+            CASE
+                WHEN campaign_id IS NULL THEN 'Without_Campaign_Coupon'
+                ELSE 'With_Campaign_Coupon'
+            END AS segment
+    FROM
+        CustomerTransactionData) T
+GROUP BY segment;
+
+-- Checking the purchase amount with campaign coupons vs normal coupons vs no coupons.
+SELECT 
+    segment, ROUND(SUM(PurchasingAmt)) AS Total_Purchase
+FROM
+    (SELECT 
+        *,
+            CASE
+                WHEN campaign_id IS NOT NULL AND coupon_id IS NOT NULL THEN 'Campaign_Coupan'
+                WHEN campaign_id IS NULL AND coupon_id IS NOT NULL THEN 'Normal_Coupan'
+                WHEN campaign_id IS NULL AND coupon_id IS NULL THEN 'No_Coupan'
+            END AS segment
+    FROM
+        CustomerTransactionData) T
+GROUP BY segment
+ORDER BY Total_Purchase;
+
+/*
+“Based on the above analysis, I have observed that Campaigns were very effective in adding new customers. 
+They also accounted for maximum share in total revenue of the company.”
+*/
+
+
+-- Section 3 : 
+-- In this section I have tried to help the marketing team in understanding the growth and decline pattern of the company in terms of new leads or sales amount by the customers.
+-- 1. Identifying the total growth on an year by year basis excluding the current year
+-- Based on quantity of paint that is sold.
+SELECT 
+	*, Total_Quantity_Sold - Total_Quantity_Sold_Last_Year AS Sales_Growth 
+FROM
+	(SELECT 
+		*, LAG(Total_Quantity_Sold) OVER() AS Total_Quantity_Sold_Last_Year 
+	 FROM
+		(SELECT 
+			YEAR(PurchaseDate) AS _Year_ ,SUM(Quantity) AS Total_Quantity_Sold 
+		 FROM 
+			CustomerTransactionData 
+		 GROUP BY  
+			YEAR(PurchaseDate) ORDER BY YEAR(PurchaseDate)) A) B;
+
+-- Based on amount of paint that is sold.
+SELECT  
+	*, ROUND(Total_Amount - Total_Amount_Last_Year) AS Sales_Growth 
+FROM
+	(SELECT 
+		*, ROUND(LAG(Total_Amount) OVER()) AS Total_Amount_Last_Year 
+	FROM
+		(SELECT 
+			Year(PurchaseDate) AS _Year_ ,SUM(PurchasingAmt) AS Total_Amount 
+		 FROM 
+			CustomerTransactionData 
+         GROUP BY 
+			YEAR(PurchaseDate) ORDER BY YEAR(PurchaseDate)) A) B;
+
+-- Based on new customers that are acquired.
+
+SELECT 
+	*,(New_Customers - New_Customers_Last_year) AS Growth 
+FROM
+	(SELECT 
+		*, LAG(New_Customers,1) OVER() AS New_Customers_Last_year 
+	 FROM
+		(SELECT 
+			PurchaseYear, Count(*) AS New_Customers 
+         FROM 
+			(SELECT 
+				Cust_Id,YEAR(PurchaseDate) AS PurchaseYear, ROW_NUMBER() OVER (PARTITION BY Cust_Id ORDER BY PurchaseDate) AS _rank_ 
+             FROM 
+              CustomerTransactionData) T
+			 WHERE _rank_ = 1 GROUP BY PurchaseYear ORDER BY PurchaseYear) T) T;
+
+
+-- Segregating new customers by OrderType
+
+SELECT 
+	*,(New_Customers - New_Customers_Last_year) AS Growth 
+FROM
+	(SELECT 
+		*, LAG(New_Customers) OVER(PARTITION BY OrderType) AS New_Customers_Last_year 
+	 FROM
+		(SELECT 
+			OrderType,PurchaseYear, count(*) as New_Customers 
+		 FROM
+			(SELECT 
+				* 
+			 FROM 
+				(SELECT 
+					YEAR(PurchaseDate) AS PurchaseYear, OrderType, Cust_Id, ROW_NUMBER() OVER (PARTITION BY Cust_Id ORDER BY PurchaseDate) AS rank_ 
+				 FROM 
+					CustomerTransactionData) T
+				 WHERE rank_ = 1) T GROUP BY OrderType, PurchaseYear ORDER BY OrderType, PurchaseYear) T) T;
+
+
+
+/*
+“Making an analysis of what is happening with our customer acquisition and sales growth over the years. 
+It can be observed that the total quantity sold per year, first increased in the year 2020 by more than 100%.
+However, it showed a negative trend in the coming years, which is 2021 and 2022. 
+Similar pattern can be observed in Total revenue collection and new customer acquisition.”
+*/
+
+-- 2. Identifying the total decline, if any, within the total sales amount on an year by year basis excluding the current year. 
+SELECT 
+	*, ROUND(Total_Amount - Total_Amount_Last_Year) AS Sales_Growth 
+FROM
+	(SELECT 
+		*, ROUND(LAG(Total_Amount) OVER()) AS Total_Amount_Last_Year 
+    FROM
+		(SELECT 
+			YEAR(PurchaseDate) AS _Year_ ,SUM(PurchasingAmt) AS Total_Amount 
+		FROM 
+			CustomerTransactionData GROUP BY (PurchaseDate) ORDER BY YEAR(PurchaseDate)) a) b;
+
+
+-- 3. Commenting on whether we need to launch a campaign for the consumers based on the recent pattern. 
+
+/*
+“There is a significant decline in Total Sales of the company. Hence, there is definitely a need to launch more and more campaigns."
+*/
+
+-- Finding best campaigns
+
+SELECT 
+    campaignType,
+    COUNT(*) AS Customers_Acquired_From_Campaign_Type
+FROM
+    CustomerTransactionData CTD
+        JOIN
+    Campaign C ON CTD.campaign_id = C.campaign_id
+GROUP BY campaignType
+ORDER BY Customers_Acquired_From_Campaign_Type DESC;
+
+/*
+"n Section 2 we have seen that campaign coupons proved beneficial in acquiring new customers and increasing total sales.
+Looking at above data it is clear that Brand Awareness and Seasonal Push Campaign will prove most beneficial.”
+*/
+
+
+-- Section 4 : 
+/*
+- A market basket analysis is defined as a customer’s overall buying pattern of different sets of products.
+- The marketing team wants to understand customer purchasing pattern. Their proposal is if they promote the products in their next campaign, 
+which are bought couple of times together, then this will increase the revenue for company. 
+In order to answer their question I have tried to answer these questions given below.
+*/
+
+-- Identifying the dates when the same customer has purchased some product(same order types and different products) from the company outlets. 
+SELECT 
+    A.PurchaseDate, B.PurchaseDate
+FROM
+    CustomerTransactionData A
+        JOIN
+    CustomerTransactionData B ON A.Trans_Id != B.Trans_Id
+WHERE
+    A.Cust_Id = B.Cust_Id
+        AND A.OrderType = B.OrderType
+        AND A.item_id != B.item_id
+        AND A.Trans_Id > B.Trans_Id;
+
+-- Out of the above, identifying the same combination of products coming at least thrice sorted in descending order of their appearance. 
+
+SELECT 
+    CONCAT(A.item_id, B.item_id) AS Bought_Together,
+    COUNT(*) AS quantity_
+FROM
+    CustomerTransactionData A
+        JOIN
+    CustomerTransactionData B ON A.Trans_Id != B.Trans_Id
+WHERE
+    A.Cust_Id = B.Cust_Id
+        AND A.OrderType = B.OrderType
+        AND A.item_id != B.item_id
+        AND A.Trans_Id > B.Trans_Id
+GROUP BY CONCAT(A.item_id, B.item_id)
+HAVING quantity_ >= 3
+ORDER BY quantity_ DESC;
+
+
+-- Out of the above combinations (coming thrice), checking which of these combinations are popular in different sectors (household, industrial and government).
+SELECT 
+    A.OrderType,
+    CONCAT(A.item_id, B.item_id) AS Bought_Together,
+    COUNT(*) AS quantity_
+FROM
+    CustomerTransactionData A
+        JOIN
+    CustomerTransactionData B ON A.Trans_Id != B.Trans_Id
+WHERE
+    A.Cust_Id = B.Cust_Id
+        AND A.OrderType = B.OrderType
+        AND A.item_id != B.item_id
+        AND A.Trans_Id > B.Trans_Id
+GROUP BY A.OrderType , CONCAT(A.item_id, B.item_id)
+HAVING quantity_ >= 3
+ORDER BY quantity_ DESC;
+
+/* On the basis of above three, highlighting the combinations of products that are bought couple of times in data on the same day.
+ Also, identifying which combinations should be promoted/advertised together to these different sectors for maximum growth.
+
+Overall:
+1.White emulsion paint + Navy blue emulsion paint (7 times)
+2. Soft red synthetic paint + Cream Emulsion paint (3 times)
+3. Green sage enamel paint + Soft Green Oil Paint (3 times)
+
+Category Wise:
+1. Household -  White emulsion paint + Navy blue emulsion paint
+2. Household -  Soft red synthetic paint + Cream Emulsion paint
+
+These combinations should be promoted together to given sectors.
+
+*/
+
+-- Section 5 : 
+-- Company is thinking of launching a new campaign in upcoming months. Here I have automated the following tasks.
+-- 1. Created Functions for the following:
+-- Getting the total discount, if any. 
+
+
+
+DELIMITER &&
+CREATE FUNCTION Discount
+	(
+	AmountP int,
+	QuantityP int,
+	PriceP int
+	)
+RETURNS INT
+DETERMINISTIC
+BEGIN
+    DECLARE temp int;
+    SET temp = (QuantityP*PriceP) - AmountP;
+    RETURN temp;
+END&&
+DELIMITER ;
+
+-- function use
+
+SELECT 
+    DISCOUNT(PurchasingAmt, quantity, Price) AS Total_Discount
+FROM
+    CustomerTransactionData CTD
+        JOIN
+    Item I ON CTD.item_id = I.Item_Id;
+
+-- Getting the days/month/year elapsed since the last purchase of a customer depending on input from user. 
+
+DELIMITER &&
+CREATE FUNCTION Elapsed
+(
+DateP DATE
+)
+RETURNS VARCHAR(20)
+DETERMINISTIC
+BEGIN
+    DECLARE temp VARCHAR(20);
+    SET temp = CASE WHEN  DATEDIFF(NOW(),DateP) < 31 THEN CONCAT(DATEDIFF(NOW(),DateP)," days")
+                    WHEN DATEDIFF(NOW(),DateP) BETWEEN 31 AND 365 THEN CONCAT((ABS(month(now())-month(DateP)))," months")
+                    ELSE concat((YEAR(now())-YEAR(DateP))," years")
+                    END;
+    RETURN temp;
+END&&
+DELIMITER ;
+
+-- function use
+
+
+SELECT 
+    ELAPSED(PurchaseDate) AS Time_Elapsed
+FROM
+    CustomerTransactionData;
+
+
+-- 2. Createing Views (using above functions) for the following:
+-- Identifying the top 10 customers along with their demographic details from each sector based on their total discount.
+CREATE VIEW 
+	TopCustomers 
+AS
+	SELECT 
+		* 
+	FROM 
+		(SELECT 
+			*, RANK() OVER(PARTITION BY OrderType ORDER BY Total_Discount DESC) AS rank_ 
+		FROM
+			(SELECT 
+				Cust_Id,City_Id,City_Name,State,Pincode,OrderType, SUM(Discount) AS Total_Discount 
+			 FROM
+				(SELECT 
+					Cust_Id,C.City_Id,City_Name,State,Pincode,OrderType,Discount(PurchasingAmt,quantity,Price) AS Discount 
+				 FROM 
+					CustomerTransactionData CTD JOIN Customer C ON CTD.Cust_Id = C.Customer_Id 
+                        JOIN 
+					Item I ON CTD.item_id = I.Item_Id JOIN City CD ON CD.City_Id = C.City_Id) A
+					GROUP BY Cust_Id,City_Id,City_Name,State,Pincode,OrderType) B) C WHERE rank_ < 11 ;
+                    
+-- executing view
+SELECT * FROM TopCustomers;
+
+-- Identifying the top 5 customers (from household and industrial sector) based on purchase amount and days elapsed in descending order. 
+
+CREATE VIEW 
+	TopCustomers2 
+AS
+SELECT 
+	* 
+FROM
+	(SELECT 
+		DISTINCT OrderType,Cust_Id,Total_Purchase, DENSE_RANK() OVER(PARTITION BY OrderType ORDER BY Total_Purchase DESC) AS rank_ 
+	FROM 
+		(SELECT 
+			*,SUM(PurchasingAmt) OVER(PARTITION BY Cust_Id ) AS Total_Purchase 
+		 FROM 
+			CustomerTransactionData) a) b WHERE rank_<6 AND OrderType in ("Household","Industrial") ;
+            
+-- executing view
+SELECT * FROM TopCustomers2;
+
+-- Identifying the top 10 products that are sold last year based on sales amount along with the last 2 year details of the same. 
+CREATE VIEW Top_Products AS
+SELECT 
+	A.item_id,Total_Purchase_2022,rank_2022,Total_Purchase_2021,Total_Purchase_2020 
+FROM 
+	(SELECT 
+		*, DENSE_RANK() OVER(ORDER BY Total_Purchase_2022 DESC) AS rank_2022 
+	FROM
+		(SELECT item_id,ROUND(SUM(PurchasingAmt)) Total_Purchase_2022 FROM CustomerTransactionData WHERE YEAR(PurchaseDate) = '2022' GROUP BY  item_id ORDER BY SUM(PurchasingAmt) DESC LIMIT 10) D) A 
+	JOIN 
+		(SELECT item_id,ROUND(SUM(PurchasingAmt)) AS Total_Purchase_2021 FROM CustomerTransactionData WHERE YEAR(PurchaseDate) = '2021' GROUP BY item_id) B ON A.item_id = B.item_id
+	JOIN 
+		(SELECT item_id,ROUND(SUM(PurchasingAmt)) AS Total_Purchase_2020 FROM CustomerTransactionData WHERE YEAR(PurchaseDate) = '2020' GROUP BY item_id) C ON A.item_id = C.item_id;
+
+-- executing view
+SELECT * FROM  Top_Products;
+
+-- Creating 3 different income groups for household sector people - ‘high class’, ‘low class’, ‘middle class’ - based on their percent rank (33% each) and identify the top 2 products that are bought within these income class.
+CREATE VIEW society_class AS
+SELECT 
+	* 
+FROM
+	(SELECT 
+		*,RANK() OVER(PARTITION BY segment ORDER BY Total_purchase DESC) AS _rank_ 
+	 FROM 
+		(SELECT 
+			DISTINCT segment,item_id,SUM(PurchasingAmt) OVER (PARTITION BY segment,item_id) AS Total_purchase 
+		 FROM
+			(SELECT 
+				*, CASE WHEN rank_percent <= 33 THEN "low_class"
+						WHEN rank_percent > 33 AND rank_percent <= 66 THEN "middle class"
+						ELSE "high class"
+						END AS segment 
+			 FROM
+				(SELECT 
+					*,(PERCENT_RANK() OVER (ORDER BY income_bracket))*100 AS rank_percent 
+				 FROM 
+					Customer C JOIN CustomerTransactionData CTD ON C.Customer_Id = CTD.Cust_Id ) T1) T2) T3) T4 WHERE _rank_ < 3;
+                    
+-- executing view
+SELECT * FROM society_class ;
+
+-- 3. Creating Stored Procedures for following data validation tasks:
+
+-- a. Identifying whether a particular transaction amount (purchase amount) is ‘correct’ or ‘not correct’. 
+/*(It is correct if price and quantity are used to calculate without a coupon. 
+In case of a coupon, the coupon amount should be deducted from the original amount given the original amount is greater 
+than equal to min purchase for a coupon; else you can simply calculate original amount based on quantity. )[Input is transaction id] 
+*/
+
+DELIMITER &&
+CREATE PROCEDURE Transaction_Validity(Trans_P VARCHAR(20))
+BEGIN
+    SELECT 
+		*,
+        CASE WHEN coupon_id IS NULL AND Actual_Amount = PurchasingAmt THEN "correct"
+                  WHEN coupon_id IS NULL AND Actual_Amount != PurchasingAmt THEN "not correct"
+                  WHEN coupon_id IS NOT NULL AND Actual_Amount > PurchasingAmt AND PurchasingAmt >= Min_Purchase THEN "correct"
+                  WHEN coupon_id IS NOT NULL AND Actual_Amount >= PurchasingAmt AND PurchasingAmt < Min_Purchase THEN " not correct"
+        END AS segment 
+	FROM
+		(SELECT 
+			Trans_Id,CM.coupon_id,price,quantity, price*quantity AS Actual_Amount,PurchasingAmt,Min_Purchase 
+		 FROM 
+			CustomerTransactionData CTD LEFT JOIN CouponMapping CM ON CTD.coupon_id = CM.coupon_id JOIN Item I ON CTD.item_id = I.Item_Id) T1 WHERE Trans_Id = Trans_P;
+END&&
+DELIMITER ;
+
+-- executing procedure
+CALL Transaction_Validity("TID00094");
+
+-- b. Checking if there is any customer with age < 12. Printing out the total such customers on-screen.
+delimiter &&
+create procedure Customer_Child()
+begin 
+    SELECT COUNT(DISTINCT Customer_Id) AS customer_count FROM Customer WHERE YEAR(NOW()) - YEAR(Birthdate) < 12;
+END&&
+DELIMITER ;
+
+CALL Customer_Child();
